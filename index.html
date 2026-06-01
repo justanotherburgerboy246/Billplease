@@ -1,443 +1,487 @@
-import React, { useState, useMemo } from 'react';
-import { Users, Receipt, Plus, ArrowRight, Wallet, UserCircle, ChevronLeft, CheckSquare, Square, CheckCircle2 } from 'lucide-react';
-
-export default function App() {
-  // --- State Management ---
-  const [members, setMembers] = useState([]);
-  const [expenses, setExpenses] = useState([]);
-  const [currentView, setCurrentView] = useState('dashboard'); // 'dashboard', 'add-member', 'add-expense', 'member-detail'
-  const [selectedMemberId, setSelectedMemberId] = useState(null);
-
-  // --- Core Calculations ---
-  const { balances, settlements } = useMemo(() => {
-    // 1. Calculate Balances
-    const currentBalances = {};
-    members.forEach(m => {
-      currentBalances[m.id] = { id: m.id, name: m.name, paid: 0, share: 0, net: 0 };
-    });
-
-    expenses.forEach(exp => {
-      // Payer paid the full amount
-      if (currentBalances[exp.payerId]) {
-        currentBalances[exp.payerId].paid += exp.amount;
-      }
-      
-      // Involved members share the cost
-      if (exp.involvedIds.length > 0) {
-        const splitAmount = exp.amount / exp.involvedIds.length;
-        exp.involvedIds.forEach(id => {
-          if (currentBalances[id]) {
-            currentBalances[id].share += splitAmount;
-          }
-        });
-      }
-    });
-
-    // Calculate Net Balance (Positive = Owed money, Negative = Owes money)
-    Object.values(currentBalances).forEach(b => {
-      b.net = b.paid - b.share;
-    });
-
-    // 2. Calculate Settlements (Debt Simplification - Greedy Algorithm)
-    const debtors = Object.values(currentBalances).filter(b => b.net < -0.01).map(b => ({ ...b, amount: Math.abs(b.net) })).sort((a, b) => b.amount - a.amount);
-    const creditors = Object.values(currentBalances).filter(b => b.net > 0.01).map(b => ({ ...b, amount: b.net })).sort((a, b) => b.amount - a.amount);
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SplitBill App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+        /* ซ่อน Scrollbar แต่ยังเลื่อนได้ */
+        ::-webkit-scrollbar { width: 0px; background: transparent; }
+    </style>
+</head>
+<body class="bg-[#FAFAFA] text-slate-900 selection:bg-slate-200 min-h-screen">
     
-    const calculatedSettlements = [];
-    let i = 0, j = 0;
-
-    while (i < debtors.length && j < creditors.length) {
-      let debtor = debtors[i];
-      let creditor = creditors[j];
-      let settleAmount = Math.min(debtor.amount, creditor.amount);
-
-      calculatedSettlements.push({
-        from: debtor.id,
-        fromName: debtor.name,
-        to: creditor.id,
-        toName: creditor.name,
-        amount: settleAmount
-      });
-
-      debtor.amount -= settleAmount;
-      creditor.amount -= settleAmount;
-
-      if (debtor.amount < 0.01) i++;
-      if (creditor.amount < 0.01) j++;
-    }
-
-    return { balances: currentBalances, settlements: calculatedSettlements };
-  }, [members, expenses]);
-
-  // --- Views ---
-  const navigate = (view, memberId = null) => {
-    setCurrentView(view);
-    if (memberId) setSelectedMemberId(memberId);
-  };
-
-  const renderDashboard = () => (
-    <div className="space-y-6">
-      {/* Overview Section */}
-      <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-800 mb-4 flex items-center"><Wallet className="mr-2 w-5 h-5 text-slate-400" /> ภาพรวมค่าใช้จ่าย</h2>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-slate-50 p-4 rounded-2xl">
-            <p className="text-sm text-slate-500 mb-1">ยอดรวมทั้งหมด</p>
-            <p className="text-2xl font-bold text-slate-800">฿{expenses.reduce((sum, exp) => sum + exp.amount, 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
-          </div>
-          <div className="bg-slate-50 p-4 rounded-2xl">
-            <p className="text-sm text-slate-500 mb-1">จำนวนบิล</p>
-            <p className="text-2xl font-bold text-slate-800">{expenses.length} รายการ</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Action Buttons */}
-      <div className="flex gap-3">
-        <button onClick={() => navigate('add-member')} className="flex-1 bg-white border border-slate-200 text-slate-700 py-3 rounded-2xl font-medium shadow-sm hover:bg-slate-50 transition-all flex items-center justify-center">
-          <Users className="w-5 h-5 mr-2 text-slate-400" /> เพิ่มสมาชิก
-        </button>
-        <button 
-          onClick={() => {
-            if (members.length === 0) alert('กรุณาเพิ่มสมาชิกก่อนเพิ่มบิล');
-            else navigate('add-expense');
-          }} 
-          className="flex-1 bg-slate-900 text-white py-3 rounded-2xl font-medium shadow-sm hover:bg-slate-800 transition-all flex items-center justify-center"
-        >
-          <Receipt className="w-5 h-5 mr-2 text-slate-300" /> เพิ่มบิล
-        </button>
-      </div>
-
-      {/* Debt Settlements Section */}
-      {settlements.length > 0 && (
-        <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
-          <h3 className="font-semibold text-slate-800 mb-4 flex items-center">
-            <CheckCircle2 className="w-5 h-5 text-emerald-500 mr-2"/>
-            สรุปการคืนเงิน
-          </h3>
-          <div className="space-y-3">
-            {settlements.map((s, idx) => (
-              <div key={idx} className="flex items-center justify-between bg-slate-50 p-4 rounded-2xl">
-                <div className="flex items-center gap-3">
-                  <span className="font-medium text-slate-600">{s.fromName}</span>
-                  <ArrowRight className="w-4 h-4 text-slate-400" />
-                  <span className="font-medium text-slate-800">{s.toName}</span>
-                </div>
-                <span className="font-bold text-slate-800">฿{s.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Members List */}
-      <div>
-        <h3 className="font-semibold text-slate-800 mb-4 px-2">สมาชิก ({members.length})</h3>
-        {members.length === 0 ? (
-          <div className="text-center py-10 text-slate-400 bg-slate-50 rounded-3xl border border-dashed border-slate-200">
-            ยังไม่มีสมาชิก กดปุ่ม "เพิ่มสมาชิก" เพื่อเริ่มต้น
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {members.map(member => {
-              const net = balances[member.id]?.net || 0;
-              return (
-                <div 
-                  key={member.id} 
-                  onClick={() => navigate('member-detail', member.id)}
-                  className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex items-center justify-between cursor-pointer hover:border-slate-300 hover:shadow-md transition-all"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-slate-50 rounded-full flex items-center justify-center">
-                      <UserCircle className="w-6 h-6 text-slate-400" />
-                    </div>
-                    <div>
-                      <h4 className="font-medium text-slate-800">{member.name}</h4>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    {net > 0.01 ? (
-                      <span className="text-emerald-600 font-semibold block">ได้คืน ฿{net.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                    ) : net < -0.01 ? (
-                      <span className="text-rose-600 font-semibold block">จ่ายเพิ่ม ฿{Math.abs(net).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                    ) : (
-                      <span className="text-slate-400 font-medium block">เคลียร์แล้ว</span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
-  const AddMemberView = () => {
-    const [name, setName] = useState('');
-    
-    const handleSubmit = (e) => {
-      e.preventDefault();
-      if (!name.trim()) return;
-      setMembers([...members, { id: Date.now().toString(), name: name.trim() }]);
-      navigate('dashboard');
-    };
-
-    return (
-      <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
-        <div className="flex items-center mb-8">
-          <button onClick={() => navigate('dashboard')} className="p-2 -ml-2 mr-2 hover:bg-slate-50 rounded-full text-slate-500 transition-colors">
-            <ChevronLeft className="w-6 h-6" />
-          </button>
-          <h2 className="text-xl font-semibold text-slate-800">เพิ่มสมาชิก</h2>
-        </div>
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div>
-            <label className="block text-sm font-medium text-slate-600 mb-2">ชื่อสมาชิก</label>
-            <input 
-              type="text" 
-              value={name} 
-              onChange={(e) => setName(e.target.value)}
-              placeholder="เช่น หมูเด้ง, นาย A..." 
-              className="w-full border border-slate-200 p-4 rounded-2xl focus:ring-2 focus:ring-slate-900 focus:border-slate-900 outline-none transition-all"
-              autoFocus
-            />
-          </div>
-          <button type="submit" className="w-full bg-slate-900 text-white py-4 rounded-2xl font-medium hover:bg-slate-800 transition-colors disabled:opacity-50" disabled={!name.trim()}>
-            บันทึก
-          </button>
-        </form>
-      </div>
-    );
-  };
-
-  const AddExpenseView = () => {
-    const [title, setTitle] = useState('');
-    const [amount, setAmount] = useState('');
-    const [payerId, setPayerId] = useState(members[0]?.id || '');
-    const [involvedIds, setInvolvedIds] = useState([]); // Default to empty array as requested
-
-    const toggleInvolved = (id) => {
-      setInvolvedIds(prev => 
-        prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
-      );
-    };
-
-    const handleSelectAll = () => {
-      if (involvedIds.length === members.length) {
-        setInvolvedIds([]); // Deselect all
-      } else {
-        setInvolvedIds(members.map(m => m.id)); // Select all
-      }
-    };
-
-    const handleSubmit = (e) => {
-      e.preventDefault();
-      if (!title || !amount || !payerId || involvedIds.length === 0) {
-        alert('กรุณากรอกข้อมูลให้ครบและเลือกคนหารอย่างน้อย 1 คน');
-        return;
-      }
-      
-      const newExpense = {
-        id: Date.now().toString(),
-        title,
-        amount: parseFloat(amount),
-        payerId,
-        involvedIds,
-        date: new Date().toISOString()
-      };
-      
-      setExpenses([...expenses, newExpense]);
-      navigate('dashboard');
-    };
-
-    return (
-      <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
-        <div className="flex items-center mb-8">
-          <button onClick={() => navigate('dashboard')} className="p-2 -ml-2 mr-2 hover:bg-slate-50 rounded-full text-slate-500 transition-colors">
-            <ChevronLeft className="w-6 h-6" />
-          </button>
-          <h2 className="text-xl font-semibold text-slate-800">เพิ่มบิลค่าใช้จ่าย</h2>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div>
-            <label className="block text-sm font-medium text-slate-600 mb-2">ชื่อรายการ</label>
-            <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="เช่น ค่าอาหารเย็น, ค่าแท็กซี่" className="w-full border border-slate-200 p-4 rounded-2xl focus:ring-2 focus:ring-slate-900 outline-none transition-all" required />
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-slate-600 mb-2">ยอดเงินรวม (บาท)</label>
-            <input type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" className="w-full border border-slate-200 p-4 rounded-2xl focus:ring-2 focus:ring-slate-900 outline-none text-xl font-semibold transition-all" required />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-600 mb-2">ใครเป็นคนจ่ายเงินบิลนี้?</label>
-            <select value={payerId} onChange={(e) => setPayerId(e.target.value)} className="w-full border border-slate-200 p-4 rounded-2xl focus:ring-2 focus:ring-slate-900 outline-none bg-white transition-all appearance-none">
-              {members.map(m => (
-                <option key={m.id} value={m.id}>{m.name}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="bg-slate-50 p-5 rounded-3xl border border-slate-100">
-            <div className="flex justify-between items-center mb-4">
-              <label className="block text-sm font-medium text-slate-700">ใครต้องหารบ้าง? ({involvedIds.length} คน)</label>
-              <button type="button" onClick={handleSelectAll} className="text-sm text-slate-500 font-medium hover:text-slate-900 transition-colors">
-                {involvedIds.length === members.length ? 'ยกเลิกทั้งหมด' : 'เลือกทุกคน'}
-              </button>
+    <header class="bg-white/80 backdrop-blur-md border-b border-slate-200/50 sticky top-0 z-10">
+        <div class="max-w-md mx-auto px-5 h-16 flex items-center justify-between">
+            <h1 class="text-xl font-bold text-slate-900 tracking-tight cursor-pointer" onclick="navigate('dashboard')">
+                SplitBill.
+            </h1>
+            <div class="w-9 h-9 bg-slate-100 rounded-full flex items-center justify-center text-slate-700">
+                <i data-lucide="receipt" class="w-4 h-4"></i>
             </div>
-            
-            <div className="grid grid-cols-2 gap-3">
-              {members.map(m => {
-                const isSelected = involvedIds.includes(m.id);
-                return (
-                  <div 
-                    key={m.id} 
-                    onClick={() => toggleInvolved(m.id)}
-                    className={`flex items-center p-3 rounded-2xl border cursor-pointer transition-all ${isSelected ? 'bg-slate-900 border-slate-900 text-white' : 'bg-white border-slate-200 hover:bg-slate-100 text-slate-700'}`}
-                  >
-                    {isSelected ? <CheckSquare className="w-5 h-5 mr-2 opacity-80" /> : <Square className="w-5 h-5 text-slate-300 mr-2" />}
-                    <span className={isSelected ? 'font-medium' : ''}>{m.name}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <button type="submit" className="w-full bg-slate-900 text-white py-4 rounded-2xl font-medium text-lg hover:bg-slate-800 shadow-sm transition-colors mt-4">
-            บันทึกบิลนี้
-          </button>
-        </form>
-      </div>
-    );
-  };
-
-  const MemberDetailView = () => {
-    const member = members.find(m => m.id === selectedMemberId);
-    if (!member) return null;
-
-    const stat = balances[member.id];
-    
-    // Find settlements related to this user
-    const userSettlementsToPay = settlements.filter(s => s.from === member.id);
-    const userSettlementsToReceive = settlements.filter(s => s.to === member.id);
-    
-    // Find related expenses
-    const relatedExpenses = expenses.filter(exp => exp.payerId === member.id || exp.involvedIds.includes(member.id));
-
-    return (
-      <div className="space-y-6">
-        <div className="flex items-center mb-4 px-2">
-          <button onClick={() => navigate('dashboard')} className="p-2 -ml-2 mr-2 hover:bg-slate-200 rounded-full text-slate-500 transition-colors">
-            <ChevronLeft className="w-6 h-6" />
-          </button>
-          <h2 className="text-xl font-semibold text-slate-800">โปรไฟล์ส่วนตัว</h2>
         </div>
+    </header>
 
-        {/* User Summary Card */}
-        <div className="bg-white rounded-3xl p-8 shadow-sm border border-slate-100 text-center">
-          <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
-            <UserCircle className="w-10 h-10 text-slate-300" />
-          </div>
-          <h3 className="text-2xl font-bold text-slate-800 mb-6">{member.name}</h3>
-          
-          <div className="grid grid-cols-2 gap-6 text-left border-t border-b border-slate-100 py-6 mb-6">
-            <div>
-              <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">จ่ายล่วงหน้าไป</p>
-              <p className="text-xl font-semibold text-slate-800">฿{stat.paid.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
-            </div>
-            <div>
-              <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">ส่วนที่ต้องจ่ายจริง</p>
-              <p className="text-xl font-semibold text-slate-800">฿{stat.share.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
-            </div>
-          </div>
-          
-          <div className={`p-5 rounded-2xl ${stat.net > 0 ? 'bg-emerald-50 text-emerald-900' : stat.net < 0 ? 'bg-rose-50 text-rose-900' : 'bg-slate-50 text-slate-800'}`}>
-            <p className="text-sm font-medium mb-1 opacity-80">ยอดสุทธิ (สรุป)</p>
-            <p className="text-2xl font-bold tracking-tight">
-              {stat.net > 0.01 ? `ได้รับคืน ฿${stat.net.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` 
-              : stat.net < -0.01 ? `ต้องจ่ายเพิ่ม ฿${Math.abs(stat.net).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` 
-              : 'เคลียร์ยอดครบแล้ว'}
-            </p>
-          </div>
-        </div>
+    <main id="app-root" class="max-w-md mx-auto p-5 pb-24"></main>
 
-        {/* Personal Settlements */}
-        {(userSettlementsToPay.length > 0 || userSettlementsToReceive.length > 0) && (
-          <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
-            <h4 className="font-semibold text-slate-800 mb-4">การเคลียร์เงิน</h4>
-            <div className="space-y-3">
-              {userSettlementsToPay.map((s, i) => (
-                <div key={`pay-${i}`} className="flex justify-between items-center p-4 bg-rose-50/50 text-rose-900 rounded-2xl border border-rose-100">
-                  <span>โอนให้ <strong className="font-semibold">{s.toName}</strong></span>
-                  <span className="font-bold">฿{s.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                </div>
-              ))}
-              {userSettlementsToReceive.map((s, i) => (
-                <div key={`rec-${i}`} className="flex justify-between items-center p-4 bg-emerald-50/50 text-emerald-900 rounded-2xl border border-emerald-100">
-                  <span>รับเงินจาก <strong className="font-semibold">{s.fromName}</strong></span>
-                  <span className="font-bold">฿{s.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+    <script>
+        // --- ฐานข้อมูลและสถานะ ---
+        let members = [];
+        let expenses = [];
+        let currentView = 'dashboard';
+        let selectedMemberId = null;
+        let balances = {};
+        let settlements = [];
 
-        {/* Transaction History */}
-        <div>
-          <h4 className="font-semibold text-slate-800 mb-4 px-2">ประวัติรายการที่เกี่ยวข้อง</h4>
-          {relatedExpenses.length === 0 ? (
-            <p className="text-center text-slate-400 py-6 text-sm bg-white rounded-3xl border border-slate-100">ยังไม่มีประวัติ</p>
-          ) : (
-            <div className="space-y-3">
-              {relatedExpenses.map(exp => {
-                const isPayer = exp.payerId === member.id;
-                const isInvolved = exp.involvedIds.includes(member.id);
-                const shareAmount = isInvolved ? (exp.amount / exp.involvedIds.length) : 0;
+        // --- โหลดและบันทึกข้อมูล (Local Storage) ---
+        function loadData() {
+            const savedMembers = localStorage.getItem('splitbill_members');
+            const savedExpenses = localStorage.getItem('splitbill_expenses');
+            if (savedMembers) members = JSON.parse(savedMembers);
+            if (savedExpenses) expenses = JSON.parse(savedExpenses);
+        }
+
+        function saveData() {
+            localStorage.setItem('splitbill_members', JSON.stringify(members));
+            localStorage.setItem('splitbill_expenses', JSON.stringify(expenses));
+        }
+
+        // --- ระบบคำนวณเงิน ---
+        function calculateData() {
+            balances = {};
+            members.forEach(m => {
+                balances[m.id] = { id: m.id, name: m.name, paid: 0, share: 0, net: 0 };
+            });
+
+            expenses.forEach(exp => {
+                // ยอดที่จ่ายไป
+                if (balances[exp.payerId]) {
+                    balances[exp.payerId].paid += exp.amount;
+                }
                 
-                return (
-                  <div key={exp.id} className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100">
-                    <div className="flex justify-between items-start mb-3">
-                      <div className="font-medium text-slate-800">{exp.title}</div>
-                      <div className="font-semibold text-slate-900">฿{exp.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                // ยอดที่ต้องหาร
+                if (exp.involvedIds.length > 0) {
+                    const splitAmount = exp.amount / exp.involvedIds.length;
+                    exp.involvedIds.forEach(id => {
+                        if (balances[id]) balances[id].share += splitAmount;
+                    });
+                }
+            });
+
+            // สรุปยอดสุทธิ
+            Object.values(balances).forEach(b => {
+                b.net = b.paid - b.share;
+            });
+
+            // คำนวณการคืนเงิน (ใครโอนให้ใคร)
+            const debtors = Object.values(balances).filter(b => b.net < -0.01).map(b => ({ ...b, amount: Math.abs(b.net) })).sort((a, b) => b.amount - a.amount);
+            const creditors = Object.values(balances).filter(b => b.net > 0.01).map(b => ({ ...b, amount: b.net })).sort((a, b) => b.amount - a.amount);
+            
+            settlements = [];
+            let i = 0, j = 0;
+
+            while (i < debtors.length && j < creditors.length) {
+                let debtor = debtors[i];
+                let creditor = creditors[j];
+                let settleAmount = Math.min(debtor.amount, creditor.amount);
+
+                settlements.push({
+                    from: debtor.id,
+                    fromName: debtor.name,
+                    to: creditor.id,
+                    toName: creditor.name,
+                    amount: settleAmount
+                });
+
+                debtor.amount -= settleAmount;
+                creditor.amount -= settleAmount;
+
+                if (debtor.amount < 0.01) i++;
+                if (creditor.amount < 0.01) j++;
+            }
+        }
+
+        // --- ฟังก์ชันช่วยเหลือ ---
+        function formatMoney(amount) {
+            return parseFloat(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+
+        function navigate(view, memberId = null) {
+            currentView = view;
+            selectedMemberId = memberId;
+            render();
+        }
+
+        // --- ส่วนควบคุมหน้าต่างๆ ---
+        
+        // 1. ส่งฟอร์มเพิ่มสมาชิก
+        window.submitMember = function(event) {
+            event.preventDefault();
+            const input = document.getElementById('memberNameInput');
+            const name = input.value.trim();
+            if(!name) return;
+            
+            members.push({ id: Date.now().toString(), name: name });
+            saveData();
+            navigate('dashboard');
+        };
+
+        // 2. ควบคุม Checkbox ในหน้าเพิ่มบิล
+        window.toggleInvolvedDOM = function(element) {
+            element.classList.toggle('selected');
+            if(element.classList.contains('selected')) {
+                element.className = "member-checkbox selected flex items-center p-3 rounded-2xl border cursor-pointer transition-all bg-slate-900 border-slate-900 text-white";
+                element.querySelector('.icon-container').innerHTML = '<i data-lucide="check-square" class="w-5 h-5 opacity-80"></i>';
+            } else {
+                element.className = "member-checkbox flex items-center p-3 rounded-2xl border cursor-pointer transition-all bg-white border-slate-200 hover:bg-slate-100 text-slate-700";
+                element.querySelector('.icon-container').innerHTML = '<i data-lucide="square" class="w-5 h-5 text-slate-300"></i>';
+            }
+            lucide.createIcons();
+        };
+
+        window.selectAllInvolvedDOM = function() {
+            const items = document.querySelectorAll('.member-checkbox');
+            let allSelected = true;
+            items.forEach(el => { if(!el.classList.contains('selected')) allSelected = false; });
+            
+            items.forEach(el => {
+                if(allSelected) { // ยกเลิกทั้งหมด
+                    el.classList.remove('selected');
+                    el.className = "member-checkbox flex items-center p-3 rounded-2xl border cursor-pointer transition-all bg-white border-slate-200 hover:bg-slate-100 text-slate-700";
+                    el.querySelector('.icon-container').innerHTML = '<i data-lucide="square" class="w-5 h-5 text-slate-300"></i>';
+                } else { // เลือกทุกคน
+                    el.classList.add('selected');
+                    el.className = "member-checkbox selected flex items-center p-3 rounded-2xl border cursor-pointer transition-all bg-slate-900 border-slate-900 text-white";
+                    el.querySelector('.icon-container').innerHTML = '<i data-lucide="check-square" class="w-5 h-5 opacity-80"></i>';
+                }
+            });
+            document.getElementById('selectAllBtn').innerText = allSelected ? 'เลือกทุกคน' : 'ยกเลิกทั้งหมด';
+            lucide.createIcons();
+        };
+
+        // 3. ส่งฟอร์มเพิ่มบิล
+        window.submitExpenseDOM = function(event) {
+            event.preventDefault();
+            const title = document.getElementById('expTitle').value;
+            const amount = document.getElementById('expAmount').value;
+            const payerId = document.getElementById('expPayer').value;
+            
+            // ดึง ID ของคนที่ถูกเลือกให้หาร
+            const involvedIds = Array.from(document.querySelectorAll('.member-checkbox.selected')).map(el => el.dataset.id);
+
+            if (!title || !amount || !payerId || involvedIds.length === 0) {
+                alert('กรุณากรอกข้อมูลให้ครบ และเลือกคนหารอย่างน้อย 1 คน');
+                return;
+            }
+
+            expenses.push({
+                id: Date.now().toString(),
+                title: title,
+                amount: parseFloat(amount),
+                payerId: payerId,
+                involvedIds: involvedIds,
+                date: new Date().toISOString()
+            });
+            
+            saveData();
+            navigate('dashboard');
+        };
+
+        // --- ระบบสร้างหน้าเว็บ (Render) ---
+        function renderDashboard() {
+            const totalExp = expenses.reduce((sum, exp) => sum + exp.amount, 0);
+            
+            let html = `
+            <div class="space-y-6">
+                <div class="bg-white rounded-3xl p-6 border border-slate-100 shadow-sm">
+                    <h2 class="text-lg font-semibold text-slate-800 mb-4 flex items-center"><i data-lucide="wallet" class="mr-2 w-5 h-5 text-slate-400"></i> ภาพรวมค่าใช้จ่าย</h2>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="bg-slate-50 p-4 rounded-2xl">
+                            <p class="text-sm text-slate-500 mb-1">ยอดรวมทั้งหมด</p>
+                            <p class="text-2xl font-bold text-slate-800">฿${formatMoney(totalExp)}</p>
+                        </div>
+                        <div class="bg-slate-50 p-4 rounded-2xl">
+                            <p class="text-sm text-slate-500 mb-1">จำนวนบิล</p>
+                            <p class="text-2xl font-bold text-slate-800">${expenses.length} รายการ</p>
+                        </div>
                     </div>
-                    <div className="text-sm text-slate-500 flex justify-between items-center">
-                      <div className="flex items-center gap-2">
-                        {isPayer && <span className="inline-block bg-slate-900 text-white text-xs px-2 py-1 rounded-lg">คนจ่ายเงิน</span>}
-                        {isInvolved ? <span>ส่วนที่ต้องหาร: <strong className="text-slate-700">฿{shareAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></span> : <span className="text-slate-400">ไม่ได้ร่วมหาร</span>}
-                      </div>
+                </div>
+
+                <div class="flex gap-3">
+                    <button onclick="navigate('add-member')" class="flex-1 bg-white border border-slate-200 text-slate-700 py-3 rounded-2xl font-medium shadow-sm hover:bg-slate-50 transition-all flex items-center justify-center">
+                        <i data-lucide="users" class="w-5 h-5 mr-2 text-slate-400"></i> เพิ่มสมาชิก
+                    </button>
+                    <button onclick="if(members.length===0) alert('กรุณาเพิ่มสมาชิกก่อนทำการเพิ่มบิลครับ'); else navigate('add-expense');" class="flex-1 bg-slate-900 text-white py-3 rounded-2xl font-medium shadow-sm hover:bg-slate-800 transition-all flex items-center justify-center">
+                        <i data-lucide="receipt" class="w-5 h-5 mr-2 text-slate-300"></i> เพิ่มบิล
+                    </button>
+                </div>
+            `;
+
+            // Settlements Section
+            if (settlements.length > 0) {
+                html += `
+                <div class="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
+                    <h3 class="font-semibold text-slate-800 mb-4 flex items-center">
+                        <i data-lucide="check-circle-2" class="w-5 h-5 text-emerald-500 mr-2"></i> สรุปการคืนเงิน
+                    </h3>
+                    <div class="space-y-3">
+                        ${settlements.map(s => `
+                            <div class="flex items-center justify-between bg-slate-50 p-4 rounded-2xl">
+                                <div class="flex items-center gap-3">
+                                    <span class="font-medium text-slate-600">${s.fromName}</span>
+                                    <i data-lucide="arrow-right" class="w-4 h-4 text-slate-400"></i>
+                                    <span class="font-medium text-slate-800">${s.toName}</span>
+                                </div>
+                                <span class="font-bold text-slate-800">฿${formatMoney(s.amount)}</span>
+                            </div>
+                        `).join('')}
                     </div>
-                  </div>
-                );
-              })}
+                </div>
+                `;
+            }
+
+            // Members List Section
+            html += `
+                <div>
+                    <h3 class="font-semibold text-slate-800 mb-4 px-2">สมาชิก (${members.length})</h3>
+                    ${members.length === 0 ? `
+                        <div class="text-center py-10 text-slate-400 bg-slate-50 rounded-3xl border border-dashed border-slate-200">
+                            ยังไม่มีสมาชิก กดปุ่ม "เพิ่มสมาชิก" ด้านบนเพื่อเริ่มต้น
+                        </div>
+                    ` : `
+                        <div class="space-y-3">
+                            ${members.map(member => {
+                                const net = balances[member.id]?.net || 0;
+                                let netHtml = '';
+                                if (net > 0.01) netHtml = `<span class="text-emerald-600 font-semibold block">ได้คืน ฿${formatMoney(net)}</span>`;
+                                else if (net < -0.01) netHtml = `<span class="text-rose-600 font-semibold block">จ่ายเพิ่ม ฿${formatMoney(Math.abs(net))}</span>`;
+                                else netHtml = `<span class="text-slate-400 font-medium block">เคลียร์แล้ว</span>`;
+
+                                return `
+                                <div onclick="navigate('member-detail', '${member.id}')" class="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex items-center justify-between cursor-pointer hover:border-slate-300 hover:shadow-md transition-all">
+                                    <div class="flex items-center gap-4">
+                                        <div class="w-10 h-10 bg-slate-50 rounded-full flex items-center justify-center">
+                                            <i data-lucide="user-circle" class="w-6 h-6 text-slate-400"></i>
+                                        </div>
+                                        <div>
+                                            <h4 class="font-medium text-slate-800">${member.name}</h4>
+                                        </div>
+                                    </div>
+                                    <div class="text-right">${netHtml}</div>
+                                </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    `}
+                </div>
+            </div>`;
+            return html;
+        }
+
+        function renderAddMember() {
+            return `
+            <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
+                <div class="flex items-center mb-8">
+                    <button onclick="navigate('dashboard')" class="p-2 -ml-2 mr-2 hover:bg-slate-50 rounded-full text-slate-500 transition-colors">
+                        <i data-lucide="chevron-left" class="w-6 h-6"></i>
+                    </button>
+                    <h2 class="text-xl font-semibold text-slate-800">เพิ่มสมาชิก</h2>
+                </div>
+                <form onsubmit="submitMember(event)" class="space-y-6">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-600 mb-2">ชื่อสมาชิก</label>
+                        <input id="memberNameInput" type="text" placeholder="เช่น หมูเด้ง, นาย A..." class="w-full border border-slate-200 p-4 rounded-2xl focus:ring-2 focus:ring-slate-900 focus:border-slate-900 outline-none transition-all" autofocus required />
+                    </div>
+                    <button type="submit" class="w-full bg-slate-900 text-white py-4 rounded-2xl font-medium hover:bg-slate-800 transition-colors">
+                        บันทึก
+                    </button>
+                </form>
             </div>
-          )}
-        </div>
-      </div>
-    );
-  };
+            `;
+        }
 
-  return (
-    <div className="min-h-screen bg-[#FAFAFA] text-slate-900 font-sans selection:bg-slate-200">
-      {/* App Header */}
-      <header className="bg-white/80 backdrop-blur-md border-b border-slate-200/50 sticky top-0 z-10">
-        <div className="max-w-md mx-auto px-5 h-16 flex items-center justify-between">
-          <h1 className="text-xl font-bold text-slate-900 tracking-tight cursor-pointer" onClick={() => navigate('dashboard')}>
-            SplitBill.
-          </h1>
-          <div className="w-9 h-9 bg-slate-100 rounded-full flex items-center justify-center text-slate-700">
-            <Receipt className="w-4 h-4" />
-          </div>
-        </div>
-      </header>
+        function renderAddExpense() {
+            return `
+            <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
+                <div class="flex items-center mb-8">
+                    <button onclick="navigate('dashboard')" class="p-2 -ml-2 mr-2 hover:bg-slate-50 rounded-full text-slate-500 transition-colors">
+                        <i data-lucide="chevron-left" class="w-6 h-6"></i>
+                    </button>
+                    <h2 class="text-xl font-semibold text-slate-800">เพิ่มบิลค่าใช้จ่าย</h2>
+                </div>
+                <form onsubmit="submitExpenseDOM(event)" class="space-y-6">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-600 mb-2">ชื่อรายการ</label>
+                        <input id="expTitle" type="text" placeholder="เช่น ค่าอาหารเย็น, ค่าแท็กซี่" class="w-full border border-slate-200 p-4 rounded-2xl focus:ring-2 focus:ring-slate-900 outline-none transition-all" required />
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-slate-600 mb-2">ยอดเงินรวม (บาท)</label>
+                        <input id="expAmount" type="number" step="0.01" placeholder="0.00" class="w-full border border-slate-200 p-4 rounded-2xl focus:ring-2 focus:ring-slate-900 outline-none text-xl font-semibold transition-all" required />
+                    </div>
 
-      {/* Main Content Area */}
-      <main className="max-w-md mx-auto p-5 pb-24">
-        {currentView === 'dashboard' && renderDashboard()}
-        {currentView === 'add-member' && <AddMemberView />}
-        {currentView === 'add-expense' && <AddExpenseView />}
-        {currentView === 'member-detail' && <MemberDetailView />}
-      </main>
-    </div>
-  );
-}
+                    <div>
+                        <label class="block text-sm font-medium text-slate-600 mb-2">ใครเป็นคนจ่ายเงินบิลนี้?</label>
+                        <select id="expPayer" class="w-full border border-slate-200 p-4 rounded-2xl focus:ring-2 focus:ring-slate-900 outline-none bg-white transition-all appearance-none">
+                            ${members.map(m => `<option value="${m.id}">${m.name}</option>`).join('')}
+                        </select>
+                    </div>
+
+                    <div class="bg-slate-50 p-5 rounded-3xl border border-slate-100">
+                        <div class="flex justify-between items-center mb-4">
+                            <label class="block text-sm font-medium text-slate-700">ใครต้องหารบ้าง?</label>
+                            <button id="selectAllBtn" type="button" onclick="selectAllInvolvedDOM()" class="text-sm text-slate-500 font-medium hover:text-slate-900 transition-colors">
+                                เลือกทุกคน
+                            </button>
+                        </div>
+                        
+                        <div class="grid grid-cols-2 gap-3">
+                            ${members.map(m => `
+                                <div data-id="${m.id}" onclick="toggleInvolvedDOM(this)" class="member-checkbox flex items-center p-3 rounded-2xl border cursor-pointer transition-all bg-white border-slate-200 hover:bg-slate-100 text-slate-700">
+                                    <span class="icon-container mr-2"><i data-lucide="square" class="w-5 h-5 text-slate-300"></i></span>
+                                    <span>${m.name}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+
+                    <button type="submit" class="w-full bg-slate-900 text-white py-4 rounded-2xl font-medium text-lg hover:bg-slate-800 shadow-sm transition-colors mt-4">
+                        บันทึกบิลนี้
+                    </button>
+                </form>
+            </div>
+            `;
+        }
+
+        function renderMemberDetail() {
+            const member = members.find(m => m.id === selectedMemberId);
+            if (!member) return '';
+
+            const stat = balances[member.id];
+            const userSettlementsToPay = settlements.filter(s => s.from === member.id);
+            const userSettlementsToReceive = settlements.filter(s => s.to === member.id);
+            const relatedExpenses = expenses.filter(exp => exp.payerId === member.id || exp.involvedIds.includes(member.id));
+
+            let html = `
+            <div class="space-y-6">
+                <div class="flex items-center mb-4 px-2">
+                    <button onclick="navigate('dashboard')" class="p-2 -ml-2 mr-2 hover:bg-slate-200 rounded-full text-slate-500 transition-colors">
+                        <i data-lucide="chevron-left" class="w-6 h-6"></i>
+                    </button>
+                    <h2 class="text-xl font-semibold text-slate-800">โปรไฟล์ส่วนตัว</h2>
+                </div>
+
+                <div class="bg-white rounded-3xl p-8 shadow-sm border border-slate-100 text-center">
+                    <div class="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <i data-lucide="user-circle" class="w-10 h-10 text-slate-300"></i>
+                    </div>
+                    <h3 class="text-2xl font-bold text-slate-800 mb-6">${member.name}</h3>
+                    
+                    <div class="grid grid-cols-2 gap-6 text-left border-t border-b border-slate-100 py-6 mb-6">
+                        <div>
+                            <p class="text-xs text-slate-400 uppercase tracking-wider mb-1">จ่ายล่วงหน้าไป</p>
+                            <p class="text-xl font-semibold text-slate-800">฿${formatMoney(stat.paid)}</p>
+                        </div>
+                        <div>
+                            <p class="text-xs text-slate-400 uppercase tracking-wider mb-1">ส่วนที่ต้องจ่ายจริง</p>
+                            <p class="text-xl font-semibold text-slate-800">฿${formatMoney(stat.share)}</p>
+                        </div>
+                    </div>
+                    
+                    <div class="p-5 rounded-2xl ${stat.net > 0 ? 'bg-emerald-50 text-emerald-900' : stat.net < 0 ? 'bg-rose-50 text-rose-900' : 'bg-slate-50 text-slate-800'}">
+                        <p class="text-sm font-medium mb-1 opacity-80">ยอดสุทธิ (สรุป)</p>
+                        <p class="text-2xl font-bold tracking-tight">
+                            ${stat.net > 0.01 ? `ได้รับคืน ฿${formatMoney(stat.net)}` 
+                            : stat.net < -0.01 ? `ต้องจ่ายเพิ่ม ฿${formatMoney(Math.abs(stat.net))}` 
+                            : 'เคลียร์ยอดครบแล้ว'}
+                        </p>
+                    </div>
+                </div>
+            `;
+
+            if (userSettlementsToPay.length > 0 || userSettlementsToReceive.length > 0) {
+                html += `
+                <div class="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
+                    <h4 class="font-semibold text-slate-800 mb-4">การเคลียร์เงิน</h4>
+                    <div class="space-y-3">
+                        ${userSettlementsToPay.map(s => `
+                            <div class="flex justify-between items-center p-4 bg-rose-50/50 text-rose-900 rounded-2xl border border-rose-100">
+                                <span>โอนให้ <strong class="font-semibold">${s.toName}</strong></span>
+                                <span class="font-bold">฿${formatMoney(s.amount)}</span>
+                            </div>
+                        `).join('')}
+                        ${userSettlementsToReceive.map(s => `
+                            <div class="flex justify-between items-center p-4 bg-emerald-50/50 text-emerald-900 rounded-2xl border border-emerald-100">
+                                <span>รับเงินจาก <strong class="font-semibold">${s.fromName}</strong></span>
+                                <span class="font-bold">฿${formatMoney(s.amount)}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                `;
+            }
+
+            html += `
+                <div>
+                    <h4 class="font-semibold text-slate-800 mb-4 px-2">ประวัติรายการที่เกี่ยวข้อง</h4>
+                    ${relatedExpenses.length === 0 ? `
+                        <p class="text-center text-slate-400 py-6 text-sm bg-white rounded-3xl border border-slate-100">ยังไม่มีประวัติ</p>
+                    ` : `
+                        <div class="space-y-3">
+                            ${relatedExpenses.map(exp => {
+                                const isPayer = exp.payerId === member.id;
+                                const isInvolved = exp.involvedIds.includes(member.id);
+                                const shareAmount = isInvolved ? (exp.amount / exp.involvedIds.length) : 0;
+                                
+                                return `
+                                <div class="bg-white p-5 rounded-3xl shadow-sm border border-slate-100">
+                                    <div class="flex justify-between items-start mb-3">
+                                        <div class="font-medium text-slate-800">${exp.title}</div>
+                                        <div class="font-semibold text-slate-900">฿${formatMoney(exp.amount)}</div>
+                                    </div>
+                                    <div class="text-sm text-slate-500 flex justify-between items-center">
+                                        <div class="flex items-center gap-2">
+                                            ${isPayer ? '<span class="inline-block bg-slate-900 text-white text-xs px-2 py-1 rounded-lg">คนจ่ายเงิน</span>' : ''}
+                                            ${isInvolved ? `<span>ส่วนที่ต้องหาร: <strong class="text-slate-700">฿${formatMoney(shareAmount)}</strong></span>` : '<span class="text-slate-400">ไม่ได้ร่วมหาร</span>'}
+                                        </div>
+                                    </div>
+                                </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    `}
+                </div>
+            </div>`;
+            
+            return html;
+        }
+
+        function render() {
+            calculateData();
+            const root = document.getElementById('app-root');
+
+            let content = '';
+            if (currentView === 'dashboard') content = renderDashboard();
+            else if (currentView === 'add-member') content = renderAddMember();
+            else if (currentView === 'add-expense') content = renderAddExpense();
+            else if (currentView === 'member-detail') content = renderMemberDetail();
+
+            root.innerHTML = content;
+            
+            // วาดไอคอนใหม่ทุกครั้งที่มีการ Render HTML ใหม่
+            lucide.createIcons();
+        }
+
+        // เริ่มต้นการทำงานของแอป
+        loadData();
+        render();
+
+    </script>
+</body>
+</html>
