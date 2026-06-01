@@ -1,0 +1,440 @@
+import React, { useState, useMemo } from 'react';
+import { Users, Receipt, Plus, ArrowRight, Wallet, UserCircle, ChevronLeft, CheckSquare, Square, CheckCircle2 } from 'lucide-react';
+
+export default function App() {
+  // --- State Management ---
+  const [members, setMembers] = useState([]);
+  const [expenses, setExpenses] = useState([]);
+  const [currentView, setCurrentView] = useState('dashboard'); // 'dashboard', 'add-member', 'add-expense', 'member-detail'
+  const [selectedMemberId, setSelectedMemberId] = useState(null);
+
+  // --- Core Calculations ---
+  const { balances, settlements } = useMemo(() => {
+    // 1. Calculate Balances
+    const currentBalances = {};
+    members.forEach(m => {
+      currentBalances[m.id] = { id: m.id, name: m.name, paid: 0, share: 0, net: 0 };
+    });
+
+    expenses.forEach(exp => {
+      // Payer paid the full amount
+      if (currentBalances[exp.payerId]) {
+        currentBalances[exp.payerId].paid += exp.amount;
+      }
+      
+      // Involved members share the cost
+      if (exp.involvedIds.length > 0) {
+        const splitAmount = exp.amount / exp.involvedIds.length;
+        exp.involvedIds.forEach(id => {
+          if (currentBalances[id]) {
+            currentBalances[id].share += splitAmount;
+          }
+        });
+      }
+    });
+
+    // Calculate Net Balance (Positive = Owed money, Negative = Owes money)
+    Object.values(currentBalances).forEach(b => {
+      b.net = b.paid - b.share;
+    });
+
+    // 2. Calculate Settlements (Debt Simplification - Greedy Algorithm)
+    const debtors = Object.values(currentBalances).filter(b => b.net < -0.01).map(b => ({ ...b, amount: Math.abs(b.net) })).sort((a, b) => b.amount - a.amount);
+    const creditors = Object.values(currentBalances).filter(b => b.net > 0.01).map(b => ({ ...b, amount: b.net })).sort((a, b) => b.amount - a.amount);
+    
+    const calculatedSettlements = [];
+    let i = 0, j = 0;
+
+    while (i < debtors.length && j < creditors.length) {
+      let debtor = debtors[i];
+      let creditor = creditors[j];
+      let settleAmount = Math.min(debtor.amount, creditor.amount);
+
+      calculatedSettlements.push({
+        from: debtor.id,
+        fromName: debtor.name,
+        to: creditor.id,
+        toName: creditor.name,
+        amount: settleAmount
+      });
+
+      debtor.amount -= settleAmount;
+      creditor.amount -= settleAmount;
+
+      if (debtor.amount < 0.01) i++;
+      if (creditor.amount < 0.01) j++;
+    }
+
+    return { balances: currentBalances, settlements: calculatedSettlements };
+  }, [members, expenses]);
+
+  // --- Views ---
+  const navigate = (view, memberId = null) => {
+    setCurrentView(view);
+    if (memberId) setSelectedMemberId(memberId);
+  };
+
+  const renderDashboard = () => (
+    <div className="space-y-6">
+      {/* Overview Section */}
+      <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-2xl p-6 text-white shadow-lg">
+        <h2 className="text-xl font-bold mb-4 flex items-center"><Wallet className="mr-2" /> ภาพรวมค่าใช้จ่าย</h2>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="bg-white/20 p-3 rounded-lg">
+            <p className="text-sm opacity-80">ยอดรวมทั้งหมด</p>
+            <p className="text-2xl font-bold">฿{expenses.reduce((sum, exp) => sum + exp.amount, 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+          </div>
+          <div className="bg-white/20 p-3 rounded-lg">
+            <p className="text-sm opacity-80">จำนวนบิล</p>
+            <p className="text-2xl font-bold">{expenses.length} รายการ</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Action Buttons */}
+      <div className="flex gap-3">
+        <button onClick={() => navigate('add-member')} className="flex-1 bg-white border border-gray-200 text-gray-700 py-3 rounded-xl font-medium shadow-sm hover:bg-gray-50 flex items-center justify-center">
+          <Users className="w-5 h-5 mr-2" /> เพิ่มสมาชิก
+        </button>
+        <button 
+          onClick={() => {
+            if (members.length === 0) alert('กรุณาเพิ่มสมาชิกก่อนเพิ่มบิล');
+            else navigate('add-expense');
+          }} 
+          className="flex-1 bg-indigo-600 text-white py-3 rounded-xl font-medium shadow-md hover:bg-indigo-700 flex items-center justify-center"
+        >
+          <Receipt className="w-5 h-5 mr-2" /> เพิ่มบิล
+        </button>
+      </div>
+
+      {/* Debt Settlements Section */}
+      {settlements.length > 0 && (
+        <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+          <h3 className="font-bold text-gray-800 mb-3 flex items-center">
+            <CheckCircle2 className="w-5 h-5 text-green-500 mr-2"/>
+            สรุปการคืนเงิน (หักล้างแล้ว)
+          </h3>
+          <div className="space-y-3">
+            {settlements.map((s, idx) => (
+              <div key={idx} className="flex items-center justify-between bg-gray-50 p-3 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-red-600">{s.fromName}</span>
+                  <ArrowRight className="w-4 h-4 text-gray-400" />
+                  <span className="font-medium text-green-600">{s.toName}</span>
+                </div>
+                <span className="font-bold text-gray-800">฿{s.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Members List */}
+      <div>
+        <h3 className="font-bold text-gray-800 mb-3 px-1">สมาชิก ({members.length})</h3>
+        {members.length === 0 ? (
+          <div className="text-center py-8 text-gray-400 bg-gray-50 rounded-xl border border-dashed border-gray-200">
+            ยังไม่มีสมาชิก กดปุ่ม "เพิ่มสมาชิก" เพื่อเริ่มต้น
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {members.map(member => {
+              const net = balances[member.id]?.net || 0;
+              return (
+                <div 
+                  key={member.id} 
+                  onClick={() => navigate('member-detail', member.id)}
+                  className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between cursor-pointer hover:border-indigo-300 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <UserCircle className="w-10 h-10 text-gray-400" />
+                    <div>
+                      <h4 className="font-medium text-gray-800">{member.name}</h4>
+                      <p className="text-xs text-gray-500">คลิกเพื่อดูรายละเอียด</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    {net > 0.01 ? (
+                      <span className="text-green-600 font-bold block">ได้คืน ฿{net.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    ) : net < -0.01 ? (
+                      <span className="text-red-600 font-bold block">ต้องจ่าย ฿{Math.abs(net).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    ) : (
+                      <span className="text-gray-400 font-medium block">เคลียร์แล้ว</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  const AddMemberView = () => {
+    const [name, setName] = useState('');
+    
+    const handleSubmit = (e) => {
+      e.preventDefault();
+      if (!name.trim()) return;
+      setMembers([...members, { id: Date.now().toString(), name: name.trim() }]);
+      navigate('dashboard');
+    };
+
+    return (
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+        <div className="flex items-center mb-6">
+          <button onClick={() => navigate('dashboard')} className="p-2 -ml-2 mr-2 hover:bg-gray-100 rounded-full text-gray-600">
+            <ChevronLeft className="w-6 h-6" />
+          </button>
+          <h2 className="text-xl font-bold text-gray-800">เพิ่มสมาชิก</h2>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อสมาชิก</label>
+            <input 
+              type="text" 
+              value={name} 
+              onChange={(e) => setName(e.target.value)}
+              placeholder="เช่น หมูเด้ง, นาย A..." 
+              className="w-full border border-gray-300 p-3 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+              autoFocus
+            />
+          </div>
+          <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-xl font-medium hover:bg-indigo-700 disabled:opacity-50" disabled={!name.trim()}>
+            บันทึก
+          </button>
+        </form>
+      </div>
+    );
+  };
+
+  const AddExpenseView = () => {
+    const [title, setTitle] = useState('');
+    const [amount, setAmount] = useState('');
+    const [payerId, setPayerId] = useState(members[0]?.id || '');
+    const [involvedIds, setInvolvedIds] = useState([]); // Default to empty array as requested
+
+    const toggleInvolved = (id) => {
+      setInvolvedIds(prev => 
+        prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+      );
+    };
+
+    const handleSelectAll = () => {
+      if (involvedIds.length === members.length) {
+        setInvolvedIds([]); // Deselect all
+      } else {
+        setInvolvedIds(members.map(m => m.id)); // Select all
+      }
+    };
+
+    const handleSubmit = (e) => {
+      e.preventDefault();
+      if (!title || !amount || !payerId || involvedIds.length === 0) {
+        alert('กรุณากรอกข้อมูลให้ครบและเลือกคนหารอย่างน้อย 1 คน');
+        return;
+      }
+      
+      const newExpense = {
+        id: Date.now().toString(),
+        title,
+        amount: parseFloat(amount),
+        payerId,
+        involvedIds,
+        date: new Date().toISOString()
+      };
+      
+      setExpenses([...expenses, newExpense]);
+      navigate('dashboard');
+    };
+
+    return (
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+        <div className="flex items-center mb-6">
+          <button onClick={() => navigate('dashboard')} className="p-2 -ml-2 mr-2 hover:bg-gray-100 rounded-full text-gray-600">
+            <ChevronLeft className="w-6 h-6" />
+          </button>
+          <h2 className="text-xl font-bold text-gray-800">เพิ่มบิลค่าใช้จ่าย</h2>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อรายการ</label>
+            <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="เช่น ค่าอาหารเย็น, ค่าแท็กซี่" className="w-full border border-gray-300 p-3 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none" required />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">ยอดเงินรวม (บาท)</label>
+            <input type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" className="w-full border border-gray-300 p-3 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-xl font-bold" required />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">ใครเป็นคนจ่ายเงินบิลนี้?</label>
+            <select value={payerId} onChange={(e) => setPayerId(e.target.value)} className="w-full border border-gray-300 p-3 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none bg-white">
+              {members.map(m => (
+                <option key={m.id} value={m.id}>{m.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+            <div className="flex justify-between items-center mb-3">
+              <label className="block text-sm font-medium text-gray-700">ใครต้องหารบ้าง? ({involvedIds.length} คน)</label>
+              <button type="button" onClick={handleSelectAll} className="text-sm text-indigo-600 font-medium hover:text-indigo-800">
+                {involvedIds.length === members.length ? 'ยกเลิกทั้งหมด' : 'เลือกทุกคน'}
+              </button>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-2">
+              {members.map(m => {
+                const isSelected = involvedIds.includes(m.id);
+                return (
+                  <div 
+                    key={m.id} 
+                    onClick={() => toggleInvolved(m.id)}
+                    className={`flex items-center p-3 rounded-lg border cursor-pointer transition-all ${isSelected ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-gray-200 hover:bg-gray-50'}`}
+                  >
+                    {isSelected ? <CheckSquare className="w-5 h-5 text-indigo-600 mr-2" /> : <Square className="w-5 h-5 text-gray-400 mr-2" />}
+                    <span className={isSelected ? 'font-medium text-indigo-900' : 'text-gray-700'}>{m.name}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <button type="submit" className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-indigo-700 shadow-md">
+            บันทึกบิลนี้
+          </button>
+        </form>
+      </div>
+    );
+  };
+
+  const MemberDetailView = () => {
+    const member = members.find(m => m.id === selectedMemberId);
+    if (!member) return null;
+
+    const stat = balances[member.id];
+    
+    // Find settlements related to this user
+    const userSettlementsToPay = settlements.filter(s => s.from === member.id);
+    const userSettlementsToReceive = settlements.filter(s => s.to === member.id);
+    
+    // Find related expenses
+    const relatedExpenses = expenses.filter(exp => exp.payerId === member.id || exp.involvedIds.includes(member.id));
+
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center mb-2 px-1">
+          <button onClick={() => navigate('dashboard')} className="p-2 -ml-2 mr-2 hover:bg-gray-200 rounded-full text-gray-600">
+            <ChevronLeft className="w-6 h-6" />
+          </button>
+          <h2 className="text-xl font-bold text-gray-800">โปรไฟล์ส่วนตัว</h2>
+        </div>
+
+        {/* User Summary Card */}
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 text-center">
+          <UserCircle className="w-16 h-16 text-indigo-200 mx-auto mb-2" />
+          <h3 className="text-2xl font-bold text-gray-800 mb-4">{member.name}</h3>
+          
+          <div className="grid grid-cols-2 gap-4 text-left border-t border-b py-4 mb-4">
+            <div>
+              <p className="text-xs text-gray-500 uppercase">จ่ายล่วงหน้าไป</p>
+              <p className="text-lg font-bold text-gray-800">฿{stat.paid.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500 uppercase">ส่วนที่ต้องจ่ายจริง</p>
+              <p className="text-lg font-bold text-gray-800">฿{stat.share.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+            </div>
+          </div>
+          
+          <div className={`p-4 rounded-xl ${stat.net > 0 ? 'bg-green-50 text-green-800' : stat.net < 0 ? 'bg-red-50 text-red-800' : 'bg-gray-100 text-gray-800'}`}>
+            <p className="text-sm font-medium mb-1">ยอดสุทธิ (สรุป)</p>
+            <p className="text-2xl font-bold">
+              {stat.net > 0.01 ? `ได้รับคืน ฿${stat.net.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` 
+              : stat.net < -0.01 ? `ต้องจ่ายเพิ่ม ฿${Math.abs(stat.net).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` 
+              : 'เคลียร์ยอดครบแล้ว ไม่มีค้าง'}
+            </p>
+          </div>
+        </div>
+
+        {/* Personal Settlements */}
+        {(userSettlementsToPay.length > 0 || userSettlementsToReceive.length > 0) && (
+          <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+            <h4 className="font-bold text-gray-800 mb-3">การโอนเงินเพื่อเคลียร์บิล</h4>
+            <div className="space-y-2">
+              {userSettlementsToPay.map((s, i) => (
+                <div key={`pay-${i}`} className="flex justify-between items-center p-3 bg-red-50 text-red-800 rounded-lg">
+                  <span>โอนให้ <strong>{s.toName}</strong></span>
+                  <span className="font-bold">฿{s.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+              ))}
+              {userSettlementsToReceive.map((s, i) => (
+                <div key={`rec-${i}`} className="flex justify-between items-center p-3 bg-green-50 text-green-800 rounded-lg">
+                  <span>รับเงินจาก <strong>{s.fromName}</strong></span>
+                  <span className="font-bold">฿{s.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Transaction History */}
+        <div>
+          <h4 className="font-bold text-gray-800 mb-3 px-1">ประวัติรายการที่เกี่ยวข้อง</h4>
+          {relatedExpenses.length === 0 ? (
+            <p className="text-center text-gray-400 py-4 text-sm">ยังไม่มีประวัติ</p>
+          ) : (
+            <div className="space-y-3">
+              {relatedExpenses.map(exp => {
+                const isPayer = exp.payerId === member.id;
+                const isInvolved = exp.involvedIds.includes(member.id);
+                const shareAmount = isInvolved ? (exp.amount / exp.involvedIds.length) : 0;
+                
+                return (
+                  <div key={exp.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="font-medium text-gray-800">{exp.title}</div>
+                      <div className="font-bold text-gray-900">฿{exp.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                    </div>
+                    <div className="text-sm text-gray-600 flex justify-between">
+                      <div>
+                        {isPayer && <span className="inline-block bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded mr-2">คนจ่ายเงิน</span>}
+                        {isInvolved ? <span>ส่วนที่ต้องหาร: <strong>฿{shareAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></span> : <span className="text-gray-400">ไม่ได้ร่วมหาร</span>}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50 text-gray-900 font-sans selection:bg-indigo-100">
+      {/* App Header */}
+      <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
+        <div className="max-w-md mx-auto px-4 h-16 flex items-center justify-between">
+          <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-blue-500 cursor-pointer" onClick={() => navigate('dashboard')}>
+            SplitBill (ระบบหารกัน)
+          </h1>
+          <div className="w-8 h-8 bg-indigo-50 rounded-full flex items-center justify-center text-indigo-600 font-bold">
+            <Receipt className="w-4 h-4" />
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content Area */}
+      <main className="max-w-md mx-auto p-4 pb-24">
+        {currentView === 'dashboard' && renderDashboard()}
+        {currentView === 'add-member' && <AddMemberView />}
+        {currentView === 'add-expense' && <AddExpenseView />}
+        {currentView === 'member-detail' && <MemberDetailView />}
+      </main>
+    </div>
+  );
+}
